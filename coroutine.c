@@ -50,6 +50,8 @@ struct coroutine_t {
 coroutine_t coroutines[10];
 int co_num = 0;
 coroutine_t *current;
+coroutine_t *a;
+coroutine_t *b;
 
 __attribute__((naked))
 void switch_context(context_t *current, context_t *next) {
@@ -111,7 +113,11 @@ void yield() {
 }
 
 void resume(coroutine_t *next) {
-    switch_context(&current->context, &next->context);
+    current->state = STOPING;
+    next->state = RUNNING;
+    coroutine_t *prev = current;
+    current = next;
+    switch_context(&prev->context, &current->context);
 }
 
 void _coroutine_start(coroutine_t *co) {
@@ -150,13 +156,21 @@ coroutine_t *create_coroutine(coroutine_entry entry, void *arg) {
 }
 
 void print(void *arg) {
-    printf("hello coroutine!\n");
+    char ch = (char) arg;
+    for (int i = 0; i < 10; i++) {
+        printf("%c%d: hello coroutine!\n", ch, i);
+        if (ch == 'a')
+            resume(b);
+        else
+            resume(a);
+    }
 }
 
 int main() {
     coroutine_t *main = get_main_coroutine();
-    coroutine_t *a = create_coroutine(print, NULL);
+    a = create_coroutine(print, (void *)'a');
+    b = create_coroutine(print, (void *)'b');
     current = main;
-    yield();
+    resume(a);
     printf("return from print\n");
 }
