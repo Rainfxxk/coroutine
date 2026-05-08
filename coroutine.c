@@ -44,12 +44,14 @@ struct coroutine_t {
         DEADED,
     } state;
     coroutine_entry entry;
+    void *arg;
 };
 
 coroutine_t coroutines[10];
 int co_num = 0;
 coroutine_t *current;
 
+__attribute__((naked))
 void switch_context(context_t *current, context_t *next) {
     __asm__ __volatile__(
         // save current context
@@ -57,8 +59,8 @@ void switch_context(context_t *current, context_t *next) {
         "movq %rbx, 8(%rdi)   \n"
         "movq %rcx, 16(%rdi)  \n"
         "movq %rdx, 24(%rdi)  \n"
-        "movq %rdi, 32(%rdi)  \n"
-        "movq %rsi, 40(%rdi)  \n"
+        "movq %rsi, 32(%rdi)  \n"
+        "movq %rdi, 40(%rdi)  \n"
         "movq %rbp, 48(%rdi)  \n"
         "movq %rsp, 56(%rdi)  \n"
         "movq %r8,  64(%rdi)  \n"
@@ -74,7 +76,7 @@ void switch_context(context_t *current, context_t *next) {
         "movq 8(%rsi),   %rbx \n"
         "movq 16(%rsi),  %rcx \n"
         "movq 24(%rsi),  %rdx \n"
-        "movq 32(%rsi),  %rdi \n"
+        "movq 40(%rsi),  %rdi \n"
         "movq 48(%rsi),  %rbp \n"
         "movq 56(%rsi),  %rsp \n"
         "movq 64(%rsi),  %r8  \n"
@@ -85,7 +87,7 @@ void switch_context(context_t *current, context_t *next) {
         "movq 104(%rsi), %r13 \n"
         "movq 112(%rsi), %r14 \n"
         "movq 120(%rsi), %r15 \n"
-        "movq 40(%rsi),  %rsi \n"
+        "movq 32(%rsi),  %rsi \n"
         // resume next
         "ret \n"
     );
@@ -96,16 +98,26 @@ void yield() {
     for (int i = 0; i < 10; i++) {
         next = &coroutines[i];
         if (next->state == STOPING || next->state == READY) {
-            current->state = STOPING;
+            if (current->state == RUNNING) {
+                current->state = STOPING;
+            }
             next->state = RUNNING;
             break;
         }
     }
-    switch_context(&current->context, &next->context);
+    coroutine_t *prev = current;
+    current = next;
+    switch_context(&prev->context, &current->context);
 }
 
 void resume(coroutine_t *next) {
     switch_context(&current->context, &next->context);
+}
+
+void _coroutine_start(coroutine_t *co) {
+    co->entry(co->arg);
+    co->state = DEADED;
+    yield();
 }
 
 coroutine_t *get_main_coroutine() {
@@ -129,16 +141,16 @@ coroutine_t *create_coroutine(coroutine_entry entry, void *arg) {
 
     co->state = READY;
     co->entry = entry;
+    co->arg = arg;
     co->context.gpr[RSP] = (uint64_t)(co->stack + STACK_SIZE - sizeof(void *));
-    co->context.gpr[RDI] = (uint64_t)arg;
-    *(uint64_t *)co->context.gpr[RSP] = (uint64_t)co->entry;
+    co->context.gpr[RDI] = (uint64_t)co;
+    *(uint64_t *)co->context.gpr[RSP] = (uint64_t)_coroutine_start;
 
     return co;
 }
 
 void print(void *arg) {
     printf("hello coroutine!\n");
-    yield();
 }
 
 int main() {
@@ -146,4 +158,5 @@ int main() {
     coroutine_t *a = create_coroutine(print, NULL);
     current = main;
     yield();
+    printf("return from print\n");
 }
