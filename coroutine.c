@@ -1,57 +1,13 @@
 #include <stdint.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include "coroutine.h"
 
-
-#define STACK_SIZE 4096
-
-
-typedef struct context_t context_t;
-typedef void (*coroutine_entry)(void *);
-typedef struct coroutine_t coroutine_t;
-
-enum GPR {
-    RAX = 0,
-    RBX,
-    RCX,
-    RDX,
-    RSI,
-    RDI,
-    RBP,
-    RSP,
-    R8,
-    R9,
-    R10,
-    R11,
-    R12,
-    R13,
-    R14,
-    R15,
-    RFLAG,
-};
-
-struct context_t {
-    uint64_t gpr[32];
-};
-
-struct coroutine_t {
-    context_t context;
-    char stack[STACK_SIZE];
-    enum {
-        READY,
-        RUNNING,
-        STOPING,
-        DEADED,
-    } state;
-    coroutine_entry entry;
-    void *arg;
-};
 
 coroutine_t coroutines[10];
 int co_num = 0;
-coroutine_t *current;
-coroutine_t *a;
-coroutine_t *b;
+coroutine_t *current = NULL;
+
 
 __attribute__((naked))
 void switch_context(context_t *current, context_t *next) {
@@ -96,6 +52,9 @@ void switch_context(context_t *current, context_t *next) {
 }
 
 void yield() {
+    if (current == NULL) {
+        current = get_main_coroutine();
+    }
     coroutine_t *next;
     for (int i = 0; i < 10; i++) {
         next = &coroutines[i];
@@ -113,6 +72,9 @@ void yield() {
 }
 
 void resume(coroutine_t *next) {
+    if (current == NULL) {
+        current = get_main_coroutine();
+    }
     current->state = STOPING;
     next->state = RUNNING;
     coroutine_t *prev = current;
@@ -127,8 +89,6 @@ void _coroutine_start(coroutine_t *co) {
 }
 
 coroutine_t *get_main_coroutine() {
-    char dummy;
-
     if (co_num == 10) {
         exit(-1);
     }
@@ -155,22 +115,3 @@ coroutine_t *create_coroutine(coroutine_entry entry, void *arg) {
     return co;
 }
 
-void print(void *arg) {
-    char ch = (char) arg;
-    for (int i = 0; i < 10; i++) {
-        printf("%c%d: hello coroutine!\n", ch, i);
-        if (ch == 'a')
-            resume(b);
-        else
-            resume(a);
-    }
-}
-
-int main() {
-    coroutine_t *main = get_main_coroutine();
-    a = create_coroutine(print, (void *)'a');
-    b = create_coroutine(print, (void *)'b');
-    current = main;
-    resume(a);
-    printf("return from print\n");
-}
